@@ -1,0 +1,80 @@
+vkCreateCommandPool
+
+vulkan中的任务是一条一条的命令command，这些command必须记录在命令缓冲区command buffer中。每个app，都会创建command buffer，包含要执行的command，最后提交到某个队列，执行。所以在记录command之前，我们必须要先创建command buffer，command buffer其实不是直接创建的，他是从池中分配的。所以我们需要先创建一个池。api为vkCreateCommandPool
+
+VkResult vkCreateCommandPool(
+	VkDevice device,
+	const VkCommandPoolCreateInfo* pCreateInfo,
+	const VkAllocationCallbacks* pAllocator,
+	VkCommandPool* pCommandPool)
+
+1.device表示拥有该池的设备
+2.pCreateInfo表示该池的描述信息，这个是一个结构体
+typedef struct VkCommandPoolCreateInfo{
+	VkStructureType sType;
+	const void* pNext,
+	VkCommandPoolCreateFlags flags;
+	uint32_t queueFamilyIndex;
+} VkCommandPoolCreateInfo;
+
+sType表示前一个包含结构体的类型，
+pNext表示指向另一个结构体的指针，该结构体包含更多关于创建池的信息
+例如，设置sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, pType = nullptr
+flags决定池以及从池分配的command buffer的行为。其值为枚举类型，VkCommandPoolCreateFlagBits，它由2个位组成
+VK_COMMAND_POOL_CREATE_TRANSIENT_BIT表示command buffer使用周期短，使用完以后很快就会退回给池，不设，你将长时间持有这个command buffer
+VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT表示允许单个command buffer可以通过重置后重用，不设，当且仅当池本身重置时，才能够隐式回收所有它分配出来的command buffer
+每一个flag的位，都会导致vulkan的一些开销，内存碎片的产生。
+queueFamilyIndex指定队列族，这个池中为这个队列族分配的command buffer会被提交到该族，
+
+3.pAllocator用于APP运行的主机内存分配。
+4.pCommandPool是输出参数，创建成功会得到一个指向池的句柄，该api返回VK_SUCCESS
+
+/////////////////////////////////
+
+创建command buffer
+VkResult vkAllocateCommandBuffers(
+	VkDevice device,
+	const VkCommandBufferAllocateInfo* pAllocateInfo,
+	VkCommandBuffer* pCommandBuffers
+)
+1.pAllocateInfo也是一个结构体，
+typedef struct VkCommandBufferAllocateInfo{
+	VkStructureType sType;
+	const void* pNext;
+	VkCommandPool commandPool;
+	VkCommandBufferLevel level;
+	uint32_t commandBufferCount;
+}
+此时sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO
+pNext = nullptr
+commandPool指向之前创建的池command pool
+level表示要分配的command buffer的级别，可以为VK_COMMAND_BUFFER_LEVEL_PRIMARY或者VK_COMMAND_BUFFER_LEVEL_SECONDARY，主和副级别
+最后一个参数要分配的command buffer的数量。
+这里要注意的是，我们其实并没有指定每个command buffer的大小，长度信息。
+该API成功会返回VK_SUCCESS，分配好的command buffer的句柄，都存放在pCommandBuffers中。
+////////////////////////////////////////////
+
+释放command buffer
+void vkFreeCommandBuffers(
+	VkDevice device,
+	VkCommandPool commandPool,
+	uint32_t commandBufferCount,
+	const VkCommandBuffer* pCommandBuffers
+)
+1.commandBufferCount表示要释放的command buffer的个数
+2.pCommandBuffers中包含要释放的command buffer的句柄
+这个释放并没有真正去释放这个command buffer所拥有的相关资源，只是把他们放回了池中
+
+/////////////////////////////
+释放整个池所拥有的资源
+void vkDestroyCommandPool(
+	VkDevice device,
+	VkCommandPool commandPool,
+	const VkAllocationCallbacks* pAllocator
+)
+在调用该命令后，所有由该池所创建出来的command buffer都会被释放掉，所以应保证在该命令执行的时候，没有正在运行的command,或者放入队列等待执行。
+
+
+
+
+
