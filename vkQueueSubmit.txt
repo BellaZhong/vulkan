@@ -1,0 +1,27 @@
+vkQueueSubmit
+
+所有的vulkan command必须要提交到一个队列中，才会被执行，该api原型为
+VkResult vkQueueSubmit(
+	VkQueue queue,
+	uint32_t submitCount,
+	const VkSubmitInfo* pSubmits,
+	VkFence fence
+)
+1.用于将多个command提交到一个设备对应的队列中去执行
+2.submitCount指定提交的次数
+3.pSubmits描述每一次提交的信息，他是一个结构体，VkSubmitInfo，每次提交都会有一个该类的实例化的对象
+typedef struct VkSubmitInfo{
+	VkStructureType sType;
+	const void* pNext;
+	uint32_t waitSemaphoreCount;
+	const VkSemaphore* pWaitSemaphores;
+	const VkPipelineStageFlags* pWaitDstStageMask;
+	uint32_t commandBufferCount;
+	const VkCommandBuffer* pCommandBuffers;
+	uint32_t signalSemaphoreCount;
+	const VkSemaphore* pSignalSemaphores;
+} VkSubmitInfo;
+sType = VK_STRUCTURE_TYPE_SUBMIT_INFO
+pNext = nullptr
+提交到同一个设备的不同的队列里的command buffer，或者提交到不同队列里的command buffer，他们之间的command可以并行执行，这个api会很早就返回，不会等待command的执行完成后再返回
+semaphore和fence用于同步
