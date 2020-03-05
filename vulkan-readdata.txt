@@ -1,0 +1,105 @@
+vulkan readback
+
+vulkan中常用的回读数据，是查询对象，query object，查询对象通过池进行创建和管理，每个对象实际上是池里的一个槽slot，所以查询的第一步，是创建一个池
+
+VkResult vkCreateQueryPool(
+	VkDevice device,
+	const VkQueryPoolCreateInfo* pCreateInfo,
+	const VkAllocationCallbacks* pAllocator,
+	VkQueryPool* pQueryPool
+)
+typedef structureVkQueryPoolCreateInfo{
+	VkStructureType sType;
+	const void* pNext;
+	VkQueryPoolCreateFlags flags;
+	VkQueryType queryType;
+	uint32_t queryCount;
+	VkQueryPipelineStatisticFlags pipelineStatistics;
+} VkQueryPoolCreateInfo
+sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO
+pNext = nullptr
+flags初始为0
+queryType指定要查询的类
+可支持的查询的类别如下：
+VK_QUERY_TYPE_OCCULUSION 遮挡查询，统计通过了深度和模板测试的样本数
+VK_QUERY_TYPE_PIPELINE_STATISTICS 管线统计查询，统计在设备的运行过程中产生的各种统计信息
+VK_QUERY_TYPE_TIMESTAMP 时间戳查询，测量执行一个command buffer里的命令所花费的时间
+
+///////////////////////////////////////////////////
+执行查询
+查询由特定的api表示开始和停止 vkCmdBeginQuery()和vkCmdEndQuery()
+void vkCmdBeginQuery(
+	VkCommandBuffer commandBuffer,
+	VkQueryPool queryPool,
+	uint32_t query,
+	VkQueryControlFlags flags
+)
+commandBuffer指定了包含收集统计数据的指令的command buffer，query是要查询的内容在queryPool中的索引，
+flags是指定额外标志位，例如指定为VK_QUERY_CONTROL_PRECISE_BIT时，查询返回精确结果，否则会返回近似的结果。
+
+void vkCmdEndQuery(
+	VkCommandBuffer commandBuffer,
+	VkQueryPool queryPool,
+	uint32_t query
+)
+这两个命令必须成对调用，否则会出现查询结果不可用，或者查询结果未定义的情况。
+
+///////////////////////////////////////////////
+获取查询结果
+VkResult vkGetQueryPoolResults(
+	VkDevice device,
+	VkQueryPool queryPool,
+	uint32_t firstQuery,
+	uint32_t queryCount,
+	size_t dataSize,
+	void* pData,
+	VkDeviceSize stride,
+	VkQueryResultFlags flags
+)
+查询结果放置在pData中，该内存为主机内存中的一块，其大小由dataSize指定，也就是说，vulkan写入查询结果的数据量，不会超过这个大小，每个查询的结果会以stride定义的间隔写入，flags指定了一些额外信息，假如为VK_QUERY_RESULT_64_BIT的话，则要求结果以64位的数据返回，否则，以32位返回。
+
+将查询结果写入缓冲区
+void vkCmdCopyQueryPoolResults(
+	VkCommandBuffer commandBuffer,
+	VkQueryPool queryPool,
+	uint32_t firstQuery,
+	uint32_t queryCount,
+	VkBuffer dstBuffer,
+	VkDeviceSize dstOffset,
+	VkDeviceSize stride,
+	VkQueryResultFlags flags
+)
+这里的commandBuffer不需要和刚才执行查询的command buffer是同一个缓冲区，这里的flags需要与vnGetQueryPoolResults()中使用相同的flags
+
+///////////////////////////////////////////////////
+遮挡查询的计数，是通过深度和模板测试的片段数，用于确定可见性，如果禁用了深度和模板测试，则查询的结果是光栅化图元的区域。
+例如游戏中，渲染地图到深度缓冲区中，然后渲染一个细节，比如树木等，最后我们可以通过遮挡查询，确定是否渲染当前对象的全细节版本，以及要渲染的对象的面积。
+
+
+管线统计信息查询，它允许应用程序测量图形管线运行的各个方面，每个查询可以测量设备在执行command buffer时更新的多个不同计数器，要启用的计数器集是查询池的属性，并在创建池的时候通过参数pipelineStatistics指定。例如
+VK_QUERY_PIPELINE_STATISTIC_...为前缀的
+...INPUT_ASSEMBLY_VERTICES_BIT，启用时，管线统计信息查询将对图形管线顶点装配阶段组装的顶点数进行计数。
+...INPUT_ASSEMBLY_PRIMITIVES_BIT, 查询图元组装阶段装配的完整图元数
+...VERTEX_SHADER_INVOCATIONS_BIT，查询顶点着色器的总调用次数
+
+
+时间戳查询，测量执行command buffer中命令的时间。可以通过vkCmdWriteTimestamp将当前设备时间写入查询池，也可从pipeline中检索出时间的瞬时值
+void vkCmdWriteTimestamp(
+	VkCommandBuffer commandBuffer,
+	VkPipelineStageFlagBits pipelineStage,
+	VkQueryPool queryPool,
+	uint32_t query
+)
+时间戳的度量单位与设备相关，时间戳始终单调增加，每个时间戳的增量值是一个与设备相关的纳秒数。
+
+
+
+
+
+
+
+
+
+
+
+
