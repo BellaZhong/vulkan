@@ -1,0 +1,156 @@
+Vulkan Sync
+
+vulkan采用异步的方式运行。vulkan同步采用多个同步原语句实现，其中三种主要的同步原语句类型为：
+1.fence 栅栏 当主机需要等待设备完成某次提交中的大量工作时使用，通常需要操作系统协助
+2.event 事件 由主机或者设备发出，当设备发出信号时，可以在命令缓冲区中通知它，并且在pipeline上的某个点由设备等它
+3.semaphore 信号量 用于控制设备上的不同队列对资源的所有权，可用于同步不同队列上可能异步执行的工作
+
+1.fence是中等量级的同步原语句，向fence传递和操作系统交互的命令，如vkQueueSubmit()，当这些命令发起的任务完成的时候，fence会收到信号通知。线程等待fence时，可能会休眠，这是为了等待时间长的操作系统设计的，例如等待多个cmdbuffer执行完毕，渲染到屏幕的时候。
+主要作用是防止主机修改正在被设备使用的数据
+创建fence对象
+VkResult vkCreateFence(
+	VkDevice device,
+	const VkFenceCreateInfo* pCreateInfo,
+	const VkAllocationCallbacks* pAllocator,
+	VkFence* pFence
+)
+device指定创建fence对象的设备
+VkFenceCreateInfo是一个结构体，其原型为
+typedef struct VkFenceCreateInfo{
+	VkStructureType sType;
+	const void* pNext;
+	VkFenceCreateFlags flags;
+}VkFenceCreateInfo
+
+sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO
+pNext = nullptr
+flags是一组标志位，其中一个较为明显的，如果设置VK_FENCE_CREATE_SIGNALED_BIT，则fence初始状态是有信号的，否则，就是无信号的
+pAllocator用于指向主机中用于分配fence内存的区域，这里可以为nullptr
+成功，会将一个非空的fence写入pFence中
+
+/////////////////////////////////////////////
+销毁fence对象释放资源
+void vkDestroyFence(
+	VkDevice device,
+	VKFence fence,
+	const VKAllocationCallbacks* pAllocator
+)
+如果在创建fence的时候没有消耗主机内存，这里的pAllocator应为nullptr
+////////////////////////////////////////////
+
+fence可用于任何接受fence的api中，例如
+VkResult vkQueueSubmit(
+	VkQueue queue,
+	uint32_t submitCount,
+	const VkSubmitInfo* pSubmits,
+	VkFence fence
+)
+
+/////////////////////////////////////////////
+查询fence状态
+VkResult vkGetFenceStatus(
+	VkDevice device,
+	VkFence fence
+)
+该API的返回值为VK_SUCCESS，表示当前是有信号的状态，VK_NOT_READY，表示当前是无信号的状态
+但是这个api是阻塞式的，所以我们一般会用vkWaitForFences
+VkResult vkWaitForFences(
+	VkDevice device,
+	uint32_t fenceCount,
+	const VkFence* pFences,
+	VkBool32 waitAll,
+	uint64_t timeout
+)
+该api可以等待任何数量的fence对象，由fenceCount指定，该api要么等待数组pFences中所有fence都变为有信号的状态，要么在任意一个fence变为有信号时返回，如果waitAll是VK_TRUE，则等待全部fence变为有信号状态，否则，就等待任何一个变为有信号状态，这个api就会返回。他的等待可能会耗费很长时间，timeout用于指定超时参数，数值单位为纳秒，64bit，如果在timeout之内没有收到信号改变，则他会返回等待超时，而不是not_ready
+VK_SUCCESS，有fence状态变为有信号
+VK_TIMEOUT，timeout之内没有fence状态变为有信号
+
+一个fence一旦收到了信号，则会保持这个状态，直到显示的把他设置为无信号的状态。重置由该api完成
+VkResult vkResetFences(
+	VkDevice device,
+	uint32_t fenceCount,
+	const VkFence* pFences
+)
+
+/////////////////////////////////////////////////////////
+事件是一个细粒度的同步原语句，事件有两种状态，有信号和无信号，他不像fence，可由操作系统从一个状态转为另一个状态，只能由设备或者主机显式的向事件发送信号或者进行重置。
+创建事件
+VkResult vkCreateEvent(
+	VkDevice device,
+	const VkEventCreateInfo* pCreateInfo,
+	const VkAllocationCallbacks* pAllocator,
+	VkEvent* pEvent
+)
+
+typedef struct VkEventCreateInfo{
+	VkStructureType sType;
+	const void* pNext;
+	VkEventCreateFlags flags
+}
+sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO
+pNext = nullptr
+flags初始状态应为0
+用完事件以后，应由如下api来释放事件对象资源
+void vkDestroyEvent(
+	VkDevice device,
+	VkEvent event,
+	const VkAllocationCallbacks* pAllocator
+)
+主机上改变事件的状态需要调用
+VkResult vkSetEvent(
+	VkDevice device,
+	VkEvent event
+)
+vkResetEvent负责重置事件的状态
+由设备对事件进行设置的api为
+void vkCmdSetEvent(
+	VkCommandBuffer commandBuffer,
+	VkEvent event,
+	VkPipelineStageFlags stageMask
+)
+同样有vkCmdResetEvent和vkGetEventStatus, vkCmdWaitEvents
+
+////////////////////////////////////////////////////
+信号量代表了可被硬件以原子方式设置和重置的标记，当设置信号量时，设备会等待他变为未设置状态，设置以后，会将调度权交给调用者。
+与另外几个同步的原语句不同的是，信号量不允许你显式的设置，重置或者等待，信号量是用于同步不同队列对资源的访问，从而形成向设备提交完整的工作部分。
+例如，在vkQueueSubmit()结构体中，用VkSubmitInfo数组作为输入，这个数组里面包含了两个信号量成员，pWaitSemaphores和pSignalSemaphores，当执行pCommandBuffers里的命令之前，队列会等待pWaitSemaphore里的所有信号量，这样，他就会获取信号量的所有权，接下来，他会执行pCommandBuffers里每一个buffer的命令，执行完后，他会向pSignalSemaphores里的每一个信号量发送信号。可以适用于跨队列命令提交，例如：
+首先，提交命令缓冲区到compute队列
+VkSubmitInfo computeSubmitInfo = 
+{
+	VK_STRUCTURE_TYPE_SUBMIT_INFO, //sType
+	nullptr, //pNext
+	0, //waitSemaphoreCount
+	nullptr, //pWaitSemaphores
+	nullptr, //pWaitDstStageMask
+	1, //commandBufferCount
+	&computeCmdBuffer, //pCommandBuffers
+	1, //signalSemaphoreCount
+	&m_computeToGfxSemaphore //pSignalSemaphores
+}
+vkQueueSubmit(
+	m_computeQueue,
+	1,
+	&computeSubmitInfo,
+	VK_NULL_HANDLE
+)
+其中pSignalSemaphores就意味着，一旦执行完，这个信号量就会变为有信号的状态
+接下来，提交到graphics队列
+{
+	VK_STRUCTURE_TYPE_SUBMIT_INFO, //sType
+	nullptr, //pNext
+	0, //waitSemaphoreCount
+	&m_computeToGfxSemaphore, //pWaitSemaphores
+	&waitStages, //pWaitDstStageMask
+	1, //commandBufferCount
+	&graphicsCmdBuffer, //pCommandBuffers
+	0, //signalSemaphoreCount
+	nullptr //pSignalSemaphores
+}
+vkQueueSubmit(
+	m_graphicsQueue,
+	1,
+	&graphicsSubmitInfo,
+	VK_NULL_HANDLE
+)
+首先，当compute queue中的命令执行完以后，他会向该信号量发送信号，接着，graphics queue中会等待这个信号量变为有信号的状态，这就保证了，graphics queue在使用数据之前，所有的compute queue上的命令都已经执行完毕。
+
