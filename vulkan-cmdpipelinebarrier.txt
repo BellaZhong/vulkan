@@ -1,0 +1,34 @@
+vulkan-cmdpipelinebarrier
+
+关于vulkan管线屏障的解释
+
+屏障是一种同步机制，用来管理内存访问，以及在管线各阶段里的资源状态变化，对资源访问进行同步和改变状态的命令主要是
+void vkCmdPipelineBarrier(
+	VkCommandBuffer			commandBuffer,
+	VkPipelineStageFlags	srcStageMask,
+	VkPipelineStageFlags	dstStageMask,
+	VkDependencyFlags		dependencyFlags,
+	uint32_t				memoryBarrierCount,
+	const VkMemoryBarrier* 	pMemoryBarriers,
+	uint32_t 				bufferMemoryBarrierCount,
+	const VkBufferMemoryBarrier*	pBufferMemoryBarriers,
+	uint32_t				imageMemoryBarrierCount,
+	const VkImageMemoryBarrier*		pImageMemoryBarriers
+);
+commandBuffer中指定需要进行屏障管理的命令缓冲区。
+srcStageMask指定哪个阶段的管线最后写入资源
+dstStageMask指定哪个阶段的管线要从资源读数据
+这两个标志位分别由多个bit组成，这些bit表示事情何时发生
+dependencyFlags是一个参数合集，描述了屏障表示的依赖关系如何影响屏障引用的资源，唯一的标志类型是VK_DEPENDENCY_BY_REGION_BIT，它表示屏障只影响被源阶段改变的区域，为目标阶段所使用。
+
+
+屏障操作有三种类型，全局内存屏障，缓冲区屏障，图像屏障
+
+全局内存屏障
+vkCmdPipelineBarrier可触发的全局内存屏障是通过memoryBarrierCount指定的。如果该值非0，则pMemoryBarriers指向一个大小为memoryBarrierCount的结构体VkMemoryBarrier类型的数组，数组中的每个元素，都代表一个内存屏障。
+typedef struct VkMemoryBarrier{
+	VkStructureType		sType;
+	const void*			pNext;
+	VkAccessFlags		srcAccessMask;
+	VkAccessFlags		dstAccessMask;
+}
