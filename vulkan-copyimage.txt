@@ -1,0 +1,117 @@
+vulkan copy image
+
+vulkan支持三种图像数据复制方式，
+从缓冲区到图像
+从图像到图像
+从图像到缓冲区
+
+调用vkCmdCopyBufferToImage()可从缓冲区向图像的一个或者多个区域复制数据，原型为
+void vkCmdCopyBufferToImage
+(
+	VkCommandBuffer			commandBuffer,
+	vkBuffer 				srcBuffer,
+	VkImage 				dstImage,
+	VkImageLayout			dstImageLayout,
+	uint32_t				regionCount,
+	const VkBufferImageCopy* pRegions
+)
+复制命令由commandBuffer指定
+缓冲区调用对象由srcBuffer指定，接收数据的目标图像由dstImage指定
+目标图像布局必须为VK_IMAGE_LAYOUT_GENERAL或者VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL，由dstImageLayout指定
+regionCount指定需要更新的区域的个数
+pRegions指向一个大小为regionCount，类型为VkBufferImageCopy的数组
+
+typedef struct VkBufferImageCopy
+{
+	VkDeviceSize			bufferOffset;
+	uint32_t				bufferRowLength;
+	uint32_t				bufferImageHeight;
+	VkImageSubresourceLayers	imageSubresource;
+	VkOffset3D				imageOffset;
+	VkExtend3D				imageExtent;
+}
+bufferOffset包含缓冲区中数据的偏移量，字节为单位。缓冲区数据从上到下，从左到右排列
+bufferRowLength指定了源数据中纹素的个数，bufferImageHeight指定了数据的行数
+如果bufferRowLength=0，则认为数据在缓冲区中紧密排布，因此imageExtent.width处处相等
+如果bufferImageHeight=0，则认为源数据中行数等于imageExtent.height
+
+接受数据的图像资源由结构体VkImageSubresourceLayers的一个实例来指定
+typedef struct VkImageSubresourceLayers
+{
+	VkImageAspectFlags		aspectMask;
+	uint32_t				mipLevel;
+	uint32_t				baseArrayLayer;
+	uint32_t				layerCount;
+} VkImageSubresourceLayers;
+aspectMask包含一个或者多个图像层面，如果目标图像是颜色图像，则只需设置aspectMask=VK_IMAGE_ASPECT_zCOLOR_BIT
+若目标图像只有模板层面，则aspectMask=VK_IMAGE_ASPECT_STENCIL_BIT
+若目标图像是复合的深度-模板图像，则aspectMask=VK_IMAGE_ASPECT_STENCIL_BIT | VK_IMAGE_ASPECT_DEPTH_BIT
+
+mipmap的层级由mipLevel指定，可将pRegions中的每一个纹素复制到mipmap的单个层级上，也可一次指定多个纹素，对应不同的层级
+若目标图像是阵列图像，则由baseArrayLayer和layerCount指定图像复制的起始层和层数，如果不是，则这两个字段分为设置为0和1
+每个区域都可以对应mipmap的整个层级，或者每个mipmap层级里的一个小区域，区域的偏移由imageOffset指定
+
+反向操作，由图像拷贝回缓冲区，则需要调用另外一个函数
+void vkCmdCopyImageToBuffer
+(
+	VkCommandBuffer			commandBuffer,
+	VkImage 				srcImage,
+	VkImageLayout 			srcImageLayout,
+	VkBuffer 				dstBuffer,
+	uint32_t 				regionCount,
+	const VkBufferImageCopy* pRegions
+)
+
+在两幅图像之间复制，需要调用如下函数
+void vkCmdCopyImage
+(
+	VkCommandBuffer 		commnadBuffer,
+	VkImage 				srcImage,
+	VkImageLayout 			srcImageLayout,
+	VkImage 				dstImage,
+	VkImageLayout 			dstImageLayout,
+	uint32_t 				regionCount,
+	const 					pRegions
+)
+
+值得注意的是，必须将两幅图像的布局传入复制命令
+与之前的copytobuffer, copytoimage相同，该函数可以一次复制多个区域，其中要复制的数据的类型定义如下
+typedef struct VkImageCopy
+{
+	VkImageSubresourceLayers 		srcSubresource;
+	VkOffset3D 						srcOffset;
+	VkImageSubresourceLayers 		dstSubresource;
+	VkOffset3D 						dstOffset;
+	VkExtent3D 						extent;
+} VkImageCopy
+
+图像的拉伸
+
+如果要想实现格式转换和改变复制区域的尺寸大小，则需要通过调用vkCmdBlitImage来实现
+当写入目标图像时，它可以接受不同格式的图像并拉伸或者缩小到需要复制的区域
+blit描述了这一行为，它是block image transfer的缩写，表明不但需要复制图像数据，而且可能存在数据的格式和尺寸的处理
+vkCmdBlitImage
+(
+	VkCommandBuffer 		commandBuffer,
+	VkImage 				srcImage,
+	VkImageLayout 			srcImageLayout,
+	VkImage 				dstImage,
+	VkImageLayout 			dstImageLayout,
+	uint32_t 				regionCount,
+	const VkImageBlit* 		pRegions,
+	VkFilter 				filter
+)
+执行blit的命令由commandBuffer传递
+其中
+typedef struct VkImageBlit
+{
+	VkImageSubresourceLayers 	srcSubresource;
+	VkOffset3D 					srcOffsets[2];
+	VkImageSubresourceLayers 	dstSubresource;
+	VkOffset3D 					dstOffsets[2];
+} VkImageBlit
+
+VkImageCopy中每一个区域都由一个结构体VkOffset3D定义，并共享一个VkExtent3D，在VkImageBlit中的每一个区域都通过一堆结构体VkOffset3D来定义
+srcOffsets和dstO	ffsets的第一个元素定义待复制区域的一个角，第二个元素定义复制区域的另外一个角，
+如果源区域和目标区域的大小不一致，则会将vkCmdBlitImage里的参数filter定义的过滤模式应用到数据的缩放上，filter必须是VK_FILTER_NEAREST或者VK_FILTER_LINEAR，分别用于点采样和线性采样。
+源图像格式必须支持VK_FORMAT_FEATURE_BLIT_SRC_BIT属性，目标图像格式必须支持VK_FORMAT_FEATURE_BLIT_DST_BIT属性
