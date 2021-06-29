@@ -1,0 +1,53 @@
+Vulkan是如何渲染一个三角形的
+
+Step 1 - Instance and physical device selection
+　　Vulkan 通过创建VkInstance 引入API来开始整个Vulkan 应用。在创建Instance时，你可以配置你的应用和来将要使用的API扩展。Instance 创建之后，就可以获取平台上Vulkan所支持的硬件，然后从中选择一个或多个VkPhysicalDevice来使用，每个的device ,你都可以获取它的属性(properties)和能力(capbilities)，比如VRAM 大小， 然后选择一个适合你需求的device。 比如，你想要一个专用显卡(dedicated graphics cards) 。
+
+Step 2 - Logical device and queue families
+　　获取你想要的硬件设备(hardware device)后，就可以通过 VkPhysicalDeviceFeatures来描述你所需要的显卡特性，像多视图渲染( multi viewport rendering )和使用64bit的float等，然后根据这些特性创建VkDevice( logical device )。当然，也可以告诉VkDevice你想要使用何种队列。Vulkan中的大多数操作，如绘画命令和内存操作，都要提交到VkQueue中，在VkQueue中异步执行这些命令。队列从队列家族(queue families)中分配，每一种队列支持一组特定的命令或操作。比如，可能存在一些不同种类的队列，它们分别支持图形操作、计算操作、内存转移操作。队列的这种特点也可以成为你你选择VkPhysicalDevice 的依据。Vulkan可能会支持一些不具有图形操作的显卡，不过请放心，目前Vulkan支持的显卡基本上都已支持你感兴趣的各种操作。
+
+Step 3 - Window surface and swap chain
+　　除非你只想离线渲染( offline rendering ) ，否则就必须创建一个将渲染结果显示到屏幕上的窗口(window)。 你可以使用本地平台的API来创建window ，或者使用像GLFW和SDL这样的库。在这篇教程中我们选择GLFW，这一点你将在后续的教程中看到。
+我们还需要另外两个组件才能对window进行渲染: 一个window surafce ( VkSurfaceKHR )和一个 swap chain( VkSwapChainKHR )， 注意KHR后缀表示这些对象是Vulkan的扩展。Vulkan是跨平台的，这也是为什么我们要使用WSI(Window system interface )扩展 来和窗口管理器(Window manager)进行交互。Surface 是对window 的一个抽象，通常他需要window 的引用来创建，比如windows上的HWND ，幸运的是GLFW的内置函数能够自动为我们解决不同平台间的差异。
+Swap chain是渲染目标的一个集合，它最简单的功能就是：保证正在渲染的image  和 现在显示在屏幕上的image 是两个不同的image。保证image渲染完毕后才能进行显示十分重要。每次我们想要画一个帧时，都必须从swap chain里请求一个image 来渲染，绘画完毕后，再将它返回到到swpa chain，以便在某个时间后显示到屏幕上。渲染的目标数量以及渲染完毕后显示到屏幕上的时机用present mode 来表示。常见的present mode有双缓冲和三缓冲，我们将在创建swap chain时再详细讨论这个问题。
+
+Step 4 - Image views and framebuffers
+　　先使用VkImageView和VkFrameBuffer将image包裹起来，然后才能将内容画到image上。imageView 引用一个image要被使用的特定部分，而framebuffer引用imageView ，把它当做color 、depth和stencil的目标使用。因为swap chain里可以有多个image ，所以我们先发制人:为每一个image 创建一个imageView和framebuffer ，然后在绘画阶段选择一个正确的来使用。
+
+Step 5 - Render passes
+　　Render pass描述了在渲染阶段要使用的image类型、如何使用以及如何处理image的内容。在我们的示例三角形应用中，我们告诉Vulkan，要使用一个image 作为color的目标，并且希望它在绘画操作前被涂成纯色。请注意，Render pass只是描述要使用的image类型，而framebuffer( 通过绑定image )才是要使用的image实体。
+
+Step 6 - Graphics pipeline
+　　在Vulkan中Graphics Pipeline 通过创建VkPipeline对象来建立。它描述了一些显卡不可编程部分的可配置状态(configurable state )，比如viewport的大小和depth buffer操作等，以及用VkShaderModule表示的可编程部分。VkShaderModule对象用着色器的字节码来创建。驱动需要知道哪些渲染目标将在pipeline中使用，而这些目标就是我们在Render pass中定义的image。
+　　Vulkan和现存的其他图形API最显著地区别就是：几乎所有不可编程部分的配置都要在pipeline创建前提前完成。这就意味着如果你想换一个着色器(shader)或者仅仅改变一些顶点的布局(vertex layout) ,那么你必须重新创建pipeline 。这也意味着你必须提前创建很多pipeline，来应对渲染过程中不同组合的配置。只有很少的一些配置你可以动态改变，比如viewport 的大小和celar 的颜色等。Pipeline中所有的配置状态你必须显示的进行定义，比如，颜色混合就没有为你提供默认的配置。
+　　它给我们带来的一个好处就如同提前编译和当场编译一样，驱动将有更多优化的机会和对运行时性能做更多的预测。
+
+Step 7 - Command pools and command buffers
+　　之前也提到，Vulkan中的命令(原文是operation )必须提交到对应的队列才能执行。这些命令首先要记录到VkCommandBuffer中，然后才能提交的到队列。这些commandBuffer来自于一个commandPool，而CommandPool关联一种具有特定命令的队列。
+　　画一个三角形，我们需要以下几个步骤来记录commandBuffer：
+开始render pass
+绑定graphics pipeline
+画三个顶点
+结束render pass。
+FrameBuffer中的image取决于swap chain返回给我们的是哪一个，所以我们必须为每一个可能的image记录一个commandBuffer，然后在绘画阶段选择正确的那个来运行。另外一种方法是每一帧都记录一个commandBuffer,但这种方法性能不高。
+
+Step 8 - Main loop
+　　现在绘画命令已经放在CommandBuffer中， Main loop就变得非常简单了。首先使用 vkAcquireNextImageKHR.从swap chain里获取一个image ，然后根据这个image选择对应的commandBuffer ，使用vkQueueSubmit执行这个commandBuffer ，最后使用vkQueuePresentKHR将这个Image 返回到swap chain准备显示。
+　　队列中的命令采用异步的方式来执行，因此我们必须采用像信号量(semaphore)这样的同步对象，来确保程序执行的正确顺序。绘画操作必须在获取image完成后才能进行，否则就会出现当前渲染和显示共用一个image的情况。vkQueuePresentKHR必须等待渲染结束才能进行交替使用， 这就需要我们再使用一个semaphore来等待渲染结束。
+
+
+
+		create_renderpass();
+		create_fbo();
+		create_indexed_vertices();
+		create_index_buffer();
+		create_graphics_pipeline()
+		create_cmd_buffer();
+		begin();
+		bind_graphics_pipeline();
+		bind_vertex_buffer();
+		bind_index_buffer(bits);
+		draw();
+		end();
+		submit();
+subpass在renderpass过程中被创建
