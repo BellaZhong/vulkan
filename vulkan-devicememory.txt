@@ -1,0 +1,61 @@
+vulkan设备内存管理
+
+当vulkan设备操作数据的时候，数据必须存储在设备内存中，这才是GPU可以访问的内存。 vulkan有4个类别的内存，每台主机及其附带的物理设备都有各自的物理存储器，每个物理存储器的某部分区域都可以被对方所使用。简单来说，就是cpu和gpu各自拿出一部分物理内存进行互相访问，剩下的用作对方不可见的内存。
+
+设备内存分配接口：
+VkResult vkAllocateMemory(
+	VkDevice						device,
+	const VkMemoryAllocateInfo*		pAllocateInfo,
+	const VkAllocationCallbacks*	pAllocator,
+	VkDeviceMemory*					pMemory
+)
+device指定从哪个设备进行内存分配。
+pAllocateInfo描述新分配的内存对象
+如果分配成功，pMemory会指向新分配的内存
+pAllocator是VkMemoryAllocateInfo的一个实例
+
+typedef struct VkMemoryAllocateInfo{
+	VkStructureType		sType;
+	const void*			pNext;
+	VkDeviceSize		allocationSize;
+	uint32_t			memoryTypeIndex;
+}VkMemoryAllocateInfo
+
+sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
+memoryTypeIndex是内存类型数组的索引
+
+一旦完成设备内存分配，它就可以用来存储缓冲区，图像等资源。释放时调用如下接口：
+void vkFreeMemory(
+	VkDevice 		device,
+	VkDeviceMemory 	memory,
+	const VkAllocationCallbacks* pAllocator
+)
+释放之前，需要保证设备上没有队列正在使用该内存，不能释放已经释放过的内存。
+
+某些平台上，单个进程内也有内存分配次数的上限，如果尝试分配次数过多，超出限制，分配也会失败，这个上限可以通过vkGetPhysicalDeviceProperties()进行查询。
+对于渲染时创建的图像，如果VkImageCreateInfo中包含VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT，则vulkan知道这个图像的生命周期很短，可能是没有必要写入设备内存的。这种情况下，可以申请延迟分配的方式，把真正的分配的时间推迟到vulkan判断真正需要用到这块内存的时候。
+
+cpu如何访问内存
+对于设备内存来说，纯设备内存不能被cpu访问，只有那部分可以被host共享的内存才能被cpu访问，可以让vulkan返回一个指向从host可访问区域分配的内存的指针，即内存映射。
+为了把设备内存映射到host内存空间，需要映射的内存对象必须从堆属性含有VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT标志的堆中分配，映射内存来获取一个主机可用的指针是通过调用vkMapMemory()来实现的。
+VkResult vkMapMemory(
+	VkDevice 	device,
+	VkDeviceMemory 	memory,
+	VkDeviceSize 	offset,
+	VkDeviceSize 	size,
+	VkMemoryMapFlags 	flags,
+	void** 			ppData
+)
+
+如果需要映射内存对象的一部分，则需要通过offset和size来指定，如果要映射整个区域，offset = 0, size = VK_WHOLE_SIZE
+flags = 0
+映射成功后，会有一个指针ppData，指向映射区
+这里牵涉到数据对齐
+对于同一个内存对象，不能同时做多次映射
+
+解除映射
+void vkUnmapMemory(
+	VkDevice 	device,
+	VkDeviceMemory 	memory
+)
+当把设备内存映射到主机内存的时候，该内存实际上有2个客户，他们可能同时对该内存执行写入操作，对于该映射，在主机和设备端都可能有缓存层级，L1, L2 cache，主机端可能与设备端一致，也可能不一致。为了保证主机和设备能够看到写入的数据的一致性，有必要强制vulkan把缓存中的数据刷进内存，因为该缓存可能包含主机写入的，但是设备还不可见的数据，或者使主机缓存失效，因为该缓存可能包含被设备覆盖调的陈旧的数据。
